@@ -3,7 +3,31 @@ const core = require('@actions/core');
 const io = require('@actions/io');
 const fs = require('fs');
 const path = require('path');
-const zipFolder = require('folder-zip-sync');
+const JSZip = require('jszip');
+
+function addFolderToZip(zip, folderPath, zipPath) {
+  const entries = fs.readdirSync(folderPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(folderPath, entry.name);
+    const entryZipPath = zipPath ? zipPath + '/' + entry.name : entry.name;
+    if (entry.isDirectory()) {
+      addFolderToZip(zip, fullPath, entryZipPath);
+    } else {
+      zip.file(entryZipPath, fs.readFileSync(fullPath));
+    }
+  }
+}
+
+async function zipFolderAsync(folderPath, targetZipName) {
+  const zip = new JSZip();
+  addFolderToZip(zip, folderPath, '');
+  const buffer = await zip.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 9 }
+  });
+  fs.writeFileSync(targetZipName, buffer);
+}
 
 class JXBCommand {
 
@@ -73,7 +97,12 @@ class JXBCommand {
   async zipdir(dirName, targetZipName) {
     console.log(`Zipping directory ${dirName}`);
     if (fs.existsSync(dirName)) {
-      zipFolder(dirName, targetZipName);
+      try {
+        await zipFolderAsync(dirName, targetZipName);
+      } catch(err) {
+        console.log(err);
+        return false;
+      }
     }
     else {
       console.log(`Error: File ${dirName} does not exist.`);
@@ -155,8 +184,9 @@ class JXB {
       var contents = fs.readFileSync(buildFile, 'utf8');
       var lines = contents.split("\n");
       for (var i = 0; i <= lines.length - 1; i++) {
-        if (lines[i].charAt(0) == '#') continue;
-        this._commands.push(new JXBCommand(lines[i]));
+        var line = lines[i].trim();
+        if (line.length == 0 || line.charAt(0) == '#') continue;
+        this._commands.push(new JXBCommand(line));
       }
       return true;
     }
